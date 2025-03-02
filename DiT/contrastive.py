@@ -196,8 +196,8 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
             losses.append(loss_value)  # 保存loss值
             pbar.set_postfix(loss=loss_value)
         classifier.schedule_step()
-        if (e + 1) % 5 == 0:
-            save_model(model, e + 1, name="DiT")
+        if (e + 1) % 20 == 0:
+            save_model(model, e, name="DiT")
         print0(f"loss: {loss_value}")
         # 训练结束后在主进程上可视化loss曲线
         if local_rank == 0:
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_amp", action='store_true', default=False)
     parser.add_argument('--batch_size', default=128, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--epoch', default=10000, type=int)
+    parser.add_argument('--epoch', default=1500, type=int)
     parser.add_argument('--time', type=int, default=0)
     parser.add_argument('--name', type=str, default='layer-0')
     opt = parser.parse_args()
