@@ -11,7 +11,8 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
-from torch.cuda.amp import autocast as autocast
+
+import matplotlib.pyplot as plt
 
 from diffusion import create_diffusion
 from download import find_model
@@ -20,16 +21,20 @@ import sys
 sys.path.append("..") 
 from utils import init_seeds, gather_tensor, DataLoaderDDP, print0
 
+from pytorch_metric_learning import losses, miners, testers
+from pytorch_metric_learning.losses import SelfSupervisedLoss
+
+
 
 class LatentCodeDataset(Dataset):
     # warning: needs A LOT OF memory to load these datasets !
     def __init__(self, dataset, train=True, num_copies=10):
         if train:
-            code_path = [f"latent_codes/{dataset}/train_code_{i}.npy" for i in range(num_copies)]
-            label_path = f"latent_codes/{dataset}/train_label.npy"
+            code_path = [f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/train_code_{i}.npy" for i in range(num_copies)]
+            label_path = f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/train_label.npy"
         else:
-            code_path = [f"latent_codes/{dataset}/test_code_0.npy"]
-            label_path = f"latent_codes/{dataset}/test_label.npy"
+            code_path = [f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/test_code_0.npy"]
+            label_path = f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/test_label.npy"
 
         self.code = []
         for p in code_path:
@@ -60,10 +65,9 @@ def get_model(device):
     diffusion = create_diffusion(None) # 1000-len betas
     return model, diffusion
 
-
-def save_model(model, epoch, path="checkpoint.pth"):
+def save_model(model, epoch, name="model"):
     if local_rank == 0:  # Only save from one process (rank 0)
-        checkpoint_path = f"{path}_epoch_{epoch}.pth"
+        checkpoint_path = f"/lpai/output/models/{name}_epoch_{epoch}.pth"
         torch.save(model.state_dict(), checkpoint_path)
         print0(f"Model saved to {checkpoint_path}")
 
@@ -83,21 +87,25 @@ def denoise_feature(code, model, timestep, blockname, use_amp):
     x_t = diffusion.q_sample(x, t, noise=noise)
     y_null = torch.tensor([1000] * x.shape[0], device=device)
 
-    with torch.no_grad():
-        with autocast(enabled=use_amp):
-            _, acts = model(x_t, t, y_null, ret_activation=True)
-        feat = acts[blockname].float().detach()
-        # (-1, 256, 1152)
-        # we average pool across the sequence dimension to extract
-        # a 1152-dimensional vector of features per example
-        return feat.mean(dim=1)
+    with torch.amp.autocast('cuda', enabled=use_amp):
+        _, acts = model(x_t, t, y_null, ret_activation=True)
+    feat = acts[blockname].float()  # 保持计算图
+    return feat.mean(dim=1)
+    # with torch.no_grad():
+    #     with autocast(enabled=use_amp):
+    #         _, acts = model(x_t, t, y_null, ret_activation=True)
+    #     feat = acts[blockname].float().detach()
+    #     # (-1, 256, 1152)
+    #     # we average pool across the sequence dimension to extract
+    #     # a 1152-dimensional vector of features per example
+    #     return feat.mean(dim=1)
 
 
 class Classifier(nn.Module):
     def __init__(self, feat_func, base_lr, epoch, num_classes):
         super(Classifier, self).__init__()
         self.feat_func = feat_func
-        self.loss_fn = nn.CrossEntropyLoss()
+        # self.loss_fn = SelfSupervisedLoss(losses.TripletMarginLoss())
 
         hidden_size = feat_func(next(iter(valid_loader))[0]).shape[-1]
         layers = nn.Sequential(
@@ -105,20 +113,37 @@ class Classifier(nn.Module):
             nn.Linear(hidden_size, num_classes),
         )
         layers = torch.nn.parallel.DistributedDataParallel(
-            layers.to(device), device_ids=[local_rank], output_device=local_rank)
+            layers.to(device), device_ids=[local_rank], output_device=local_rank
+            )
         self.classifier = layers
         self.optim = torch.optim.Adam(self.classifier.parameters(), lr=base_lr)
         self.scheduler = CosineAnnealingLR(self.optim, epoch)
 
-    def train(self, x, y):
+    def train_DiT(self, x, y):
         self.classifier.train()
-        feat = self.feat_func(x)
-        logit = self.classifier(feat)
-        loss = self.loss_fn(logit, y)
+        loss_fn = SelfSupervisedLoss(losses.TripletMarginLoss())
+        feat_anchor = self.feat_func(x)
+        feat_positive = self.feat_func(x)
+        loss = loss_fn(feat_anchor, feat_positive)
 
         self.optim.zero_grad()
         loss.backward()
         self.optim.step()
+        return loss.item()
+
+
+    def train_Classifier(self, x, y):
+        self.classifier.train()
+        loss_fn = nn.CrossEntropyLoss()
+        feat = self.feat_func(x)
+        logit = self.classifier(feat)
+        loss = loss_fn(logit, y)
+
+        self.optim.zero_grad()
+        loss.backward()
+        self.optim.step()
+        return loss.item()
+
 
     def test(self, x):
         with torch.no_grad():
@@ -136,6 +161,7 @@ class Classifier(nn.Module):
 
 
 def train(model, timestep, blockname, epoch, base_lr, use_amp):
+    losses = []
     def test():
         preds = []
         labels = []
@@ -166,13 +192,27 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
         pbar = tqdm(train_loader, disable=(local_rank!=0))
         for i, (image, label) in enumerate(pbar):
             pbar.set_description("[epoch %d / iter %d]: lr: %.1e" % (e, i, classifier.get_lr()))
-            classifier.train(image.to(device), label.to(device))
+            loss_value = classifier.train_DiT(image.to(device), label.to(device))
+            losses.append(loss_value)  # 保存loss值
+            pbar.set_postfix(loss=loss_value)
         classifier.schedule_step()
         if (e + 1) % 5 == 0:
-            save_model(model, e, path="model_checkpoint")
-        acc = test()
-        if 'LOCAL_RANK' not in os.environ or int(os.environ['LOCAL_RANK']) == 0:
-            print0(f"Test acc in epoch {e}: {acc * 100}")
+            save_model(model, e + 1, name="DiT")
+        print0(f"loss: {loss_value}")
+        # 训练结束后在主进程上可视化loss曲线
+        if local_rank == 0:
+            losses_draw = losses[::10]
+            plt.figure(figsize=(10, 5))
+            plt.plot(losses_draw, label='Training Loss')
+            plt.xlabel('Iteration')
+            plt.ylabel('Loss')
+            plt.title('Training Loss over Iterations')
+            plt.legend()
+            plt.savefig("loss_curve.png")
+            plt.show()
+
+        # acc = test()
+        # print0(f"loss: {loss_value}, Test acc in epoch {e}: {acc * 100}%")
 
 
 
@@ -197,8 +237,8 @@ if __name__ == "__main__":
                         help='node rank for distributed training')
     parser.add_argument("--use_amp", action='store_true', default=False)
     parser.add_argument('--batch_size', default=128, type=int)
-    parser.add_argument('--lr', default=1e-3, type=float)
-    parser.add_argument('--epoch', default=30, type=int)
+    parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--epoch', default=10000, type=int)
     parser.add_argument('--time', type=int, default=0)
     parser.add_argument('--name', type=str, default='layer-0')
     opt = parser.parse_args()
