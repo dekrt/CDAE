@@ -54,7 +54,8 @@ class LatentCodeDataset(Dataset):
 
 def get_model(device):
     model = DiT_XL_2().to(device)
-    state_dict = find_model(f"DiT-XL-2-256x256.pt")
+    # state_dict = find_model(f"DiT-XL-2-256x256.pt")
+    state_dict = find_model(f"/lpai/models/ditssl/25-03-04-1/DiT_epoch_1499.pth")
     model.load_state_dict(state_dict)
     model.eval()
     diffusion = create_diffusion(None) # 1000-len betas
@@ -168,8 +169,8 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
             pbar.set_description("[epoch %d / iter %d]: lr: %.1e" % (e, i, classifier.get_lr()))
             classifier.train(image.to(device), label.to(device))
         classifier.schedule_step()
-        if (e + 1) % 5 == 0:
-            save_model(model, e, path="model_checkpoint")
+        # if (e + 1) % 5 == 0:
+        #     save_model(model, e, path="model_checkpoint")
         acc = test()
         if 'LOCAL_RANK' not in os.environ or int(os.environ['LOCAL_RANK']) == 0:
             print0(f"Test acc in epoch {e}: {acc * 100}")

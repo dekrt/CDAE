@@ -61,7 +61,7 @@ def get_model(device):
     model = DiT_XL_2().to(device)
     state_dict = find_model(f"DiT-XL-2-256x256.pt")
     model.load_state_dict(state_dict)
-    model.eval()
+    # model.eval()
     diffusion = create_diffusion(None) # 1000-len betas
     return model, diffusion
 
@@ -211,8 +211,6 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
             plt.savefig("loss_curve.png")
             plt.show()
 
-        # acc = test()
-        # print0(f"loss: {loss_value}, Test acc in epoch {e}: {acc * 100}%")
 
 
 
@@ -238,7 +236,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_amp", action='store_true', default=False)
     parser.add_argument('--batch_size', default=128, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--epoch', default=1500, type=int)
+    parser.add_argument('--epoch', default=600, type=int)
     parser.add_argument('--time', type=int, default=0)
     parser.add_argument('--name', type=str, default='layer-0')
     opt = parser.parse_args()
