@@ -176,4 +176,6 @@ cython_debug/
 DiT/latent_codes/
 DiT/pretrained_models/
 DiT/debug_pics/
+DiT/results
+DiT/dataset
 data/

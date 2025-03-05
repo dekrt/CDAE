@@ -34,7 +34,8 @@ def download_model(model_name):
     Downloads a pre-trained DiT model from the web.
     """
     assert model_name in pretrained_models
-    local_path = f'/lpai/inputs/models/ditssl-25-03-02-1/cdae/pretrained_models/{model_name}'
+    local_path = f'pretrained_models/{model_name}'
+    # local_path = f'/lpai/inputs/models/ditssl-25-03-02-1/cdae/pretrained_models/{model_name}'
     if not os.path.isfile(local_path):
         os.makedirs('pretrained_models', exist_ok=True)
         web_path = f'https://dl.fbaipublicfiles.com/DiT/models/{model_name}'

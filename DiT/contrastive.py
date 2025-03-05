@@ -29,12 +29,18 @@ from pytorch_metric_learning.losses import SelfSupervisedLoss
 class LatentCodeDataset(Dataset):
     # warning: needs A LOT OF memory to load these datasets !
     def __init__(self, dataset, train=True, num_copies=10):
+        # if train:
+        #     code_path = [f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/train_code_{i}.npy" for i in range(num_copies)]
+        #     label_path = f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/train_label.npy"
+        # else:
+        #     code_path = [f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/test_code_0.npy"]
+        #     label_path = f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/test_label.npy"
         if train:
-            code_path = [f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/train_code_{i}.npy" for i in range(num_copies)]
-            label_path = f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/train_label.npy"
+            code_path = [f"latent_codes/{dataset}/train_code_{i}.npy" for i in range(num_copies)]
+            label_path = f"latent_codes/{dataset}/train_label.npy"
         else:
-            code_path = [f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/test_code_0.npy"]
-            label_path = f"/lpai/inputs/models/ditssl-25-03-02-1/cdae/latent_codes/{dataset}/test_label.npy"
+            code_path = [f"latent_codes/{dataset}/test_code_0.npy"]
+            label_path = f"latent_codes/{dataset}/test_label.npy"
 
         self.code = []
         for p in code_path:
@@ -91,6 +97,7 @@ def denoise_feature(code, model, timestep, blockname, use_amp):
         _, acts = model(x_t, t, y_null, ret_activation=True)
     feat = acts[blockname].float()  # 保持计算图
     return feat.mean(dim=1)
+
     # with torch.no_grad():
     #     with autocast(enabled=use_amp):
     #         _, acts = model(x_t, t, y_null, ret_activation=True)
@@ -208,8 +215,8 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
             plt.ylabel('Loss')
             plt.title('Training Loss over Iterations')
             plt.legend()
-            plt.savefig("loss_curve.png")
-            plt.show()
+            plt.savefig("/lpai/output/models/loss_curve.png")
+            # plt.show()
 
 
 

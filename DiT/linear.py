@@ -54,8 +54,8 @@ class LatentCodeDataset(Dataset):
 
 def get_model(device):
     model = DiT_XL_2().to(device)
-    # state_dict = find_model(f"DiT-XL-2-256x256.pt")
-    state_dict = find_model(f"/lpai/models/ditssl/25-03-04-1/DiT_epoch_1499.pth")
+    state_dict = find_model(f"DiT-XL-2-256x256.pt")
+    # state_dict = find_model(f"/lpai/models/ditssl/25-03-04-1/DiT_epoch_1499.pth")
     model.load_state_dict(state_dict)
     model.eval()
     diffusion = create_diffusion(None) # 1000-len betas

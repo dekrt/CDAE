@@ -11,6 +11,8 @@ import torch as th
 import enum
 
 from .diffusion_utils import discretized_gaussian_log_likelihood, normal_kl
+from pytorch_metric_learning import losses, miners, testers
+from pytorch_metric_learning.losses import SelfSupervisedLoss
 
 
 def mean_flat(tensor):
@@ -728,7 +730,10 @@ class GaussianDiffusion:
             model_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
+            noise_positive = th.randn_like(x_start)
+
         x_t = self.q_sample(x_start, t, noise=noise)
+        x_t_positive = self.q_sample(x_start, t, noise=noise_positive)
 
         terms = {}
 
@@ -744,7 +749,16 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-            model_output = model(x_t, t, **model_kwargs)
+            model_output, acts = model(x_t, t, **model_kwargs)
+            _, acts_positive = model(x_t_positive, t, **model_kwargs)
+
+            feat = acts['layer-13'].float().mean(dim=1)
+            feat_positive = acts_positive['layer-13'].float().mean(dim=1)
+            loss_fn_contrastive = SelfSupervisedLoss(losses.TripletMarginLoss())
+            loss_contrastive = loss_fn_contrastive(feat, feat_positive)
+            terms['contrastive'] = loss_contrastive
+
+
 
             if self.model_var_type in [
                 ModelVarType.LEARNED,
