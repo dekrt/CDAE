@@ -181,7 +181,7 @@ def main(args):
         ]
     )
     dataset = CIFAR10(
-        "/lpai/datasets/cifar10-lhp/versions/0.1.0/CIFAR10", train=True, download=False, transform=train_transform
+        "/lpai/datasets/cifar10-lhp/versions/0.1.0", train=True, download=False, transform=train_transform
     )
 
 
