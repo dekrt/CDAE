@@ -173,6 +173,10 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Vscode debug configurations
+.vscode
+
+# datasets and params
 DiT/latent_codes/
 DiT/pretrained_models/
 DiT/debug_pics/

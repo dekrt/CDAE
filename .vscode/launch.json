@@ -1,24 +1,52 @@
 {
-    "version": "0.2.0",
-    "configurations": [
+  "version": "0.2.0",
+  "configurations": [
       {
-        "name": "Python: TorchRun",
-        "type": "debugpy",
-        "request": "launch",
-        "console": "integratedTerminal",
-        "module": "torch.distributed.run",
-        "args": [
-          "--nnodes", "1",
-          "--nproc_per_node", "2",
-          "/lpai/zxk/ddae/DiT/train.py",
-          "--model", "DiT-XL/2",
-          "--num-classes", "10"
-        ],
-        "env": {
-          "CUDA_VISIBLE_DEVICES": "6,7"
-        },
-        // "justMyCode": true
+          "name": "Python: train_dit_contrastive.py",
+          "type": "debugpy",
+          "request": "launch",
+          "console": "integratedTerminal",
+          "module": "torch.distributed.run",
+          "args": [
+              "--nnodes", "1",
+              "--nproc_per_node", "2",
+              "/lpai/zxk/ddae/DiT/train_contrastive.py",
+              "--model", "DiT-XL/2",
+              "--ckpt", "/lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt",
+              // "--num-classes", "10",
+              // "--freezing-decoder",
+              "--global-batch-size", "64",
+              "--epochs", "600"
+              // "--results-dir", "/lpai/output/models"
+          ],
+          "env": {
+              "CUDA_VISIBLE_DEVICES": "6,7",
+              "PYTHONPATH": "/lpai/zxk/ddae/DiT"
+          },
+          "cwd": "/lpai/zxk/ddae/DiT"
+          // "justMyCode": true
+      },
+      {
+          "name": "Python: linear_probing.py",
+          "type": "debugpy",
+          "request": "launch",
+          "console": "integratedTerminal",
+          "module": "torch.distributed.run",
+          "args": [
+              "--nnodes", "1",
+              "--nproc_per_node", "2",
+              "/lpai/zxk/ddae/DiT/linear_probing.py",
+              "--train-data-path", "/lpai/dataset/imagenet-1k/0-1-0/train",
+              "--val-data-path", "/lpai/dataset/imagenet-1k/0-1-0/ILSVRC2012/val",
+              "--dataset", "imagenet",
+              "--ckpt", "/lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt"
+          ],
+          "env": {
+              "CUDA_VISIBLE_DEVICES": "0,1",
+              "PYTHONPATH": "/lpai/zxk/ddae/DiT"
+          },
+          "cwd": "/lpai/zxk/ddae/DiT"
+          // "justMyCode": false
       }
-    ]
-  }
-  
+  ]
+}

@@ -32,10 +32,18 @@ from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 from download import find_model
+from .linear import denoise_feature, Classifier, train
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
 
 
 from pytorch_metric_learning import losses, miners, testers
 from pytorch_metric_learning.losses import SelfSupervisedLoss
+
+
+
+
+
 
 
 
@@ -235,6 +243,75 @@ def main(args):
     running_loss = 0
     start_time = time()
 
+    # function for linear probing
+    def linear_probing(model, timestep=81, blockname='layer-13', epoch=50, base_lr=1e-4, use_amp=False):
+        class Classifier(nn.Module):
+            def __init__(self, feat_func, base_lr, epoch, num_classes):
+                super(Classifier, self).__init__()
+                self.feat_func = feat_func
+                self.loss_fn = nn.CrossEntropyLoss()
+
+                hidden_size = feat_func(next(iter(valid_loader))[0]).shape[-1]
+                layers = nn.Sequential(
+                    # nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6),
+                    nn.Linear(hidden_size, num_classes),
+                )
+                layers = torch.nn.parallel.DistributedDataParallel(
+                    layers.to(device), device_ids=[rank], output_device=rank
+                )
+                self.classifier = layers
+                self.optim = torch.optim.Adam(self.classifier.parameters(), lr=base_lr)
+                self.scheduler = CosineAnnealingLR(self.optim, epoch)
+
+            def train(self, x, y):
+                self.classifier.train()
+                feat = self.feat_func(x)
+                logit = self.classifier(feat)
+                loss = self.loss_fn(logit, y)
+
+                self.optim.zero_grad()
+                loss.backward()
+                self.optim.step()
+
+            def test(self, x):
+                with torch.no_grad():
+                    self.classifier.eval()
+                    feat = self.feat_func(x)
+                    logit = self.classifier(feat)
+                    pred = logit.argmax(dim=-1)
+                    return pred
+
+            def get_lr(self):
+                return self.optim.param_groups[0]['lr']
+
+            def schedule_step(self):
+                self.scheduler.step()
+
+
+
+        def linear():
+            preds = []
+            labels = []
+            for x, y in loader:
+                x = x.to(device)
+                y = y.to(device)
+                with torch.no_grad():
+                # Map input images to latent space + normalize latents:
+                    x = vae.encode(x).latent_dist.sample().mul_(0.18215)
+                t = torch.tensor([timestep]).to(device).repeat(x.shape[0])
+                noise = torch.randn_like(x)
+                x_t = diffusion.q_sample(x, t, noise=noise)
+                y_null = torch.tensor([1000] * x.shape[0], device=device)
+                with torch.no_grad():
+                    _, acts = model(x_t, t, y_null, ret_activation=True)
+                    feat = acts[blockname].float().detach()
+                    feat = feat.mean(dim=1)
+                
+                
+
+
+
+
 
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch in range(args.epochs):
@@ -301,6 +378,11 @@ def main(args):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                 dist.barrier()
+        if epoch % 10 == 0:
+            model.eval()
+            train(model, 81, 'layer-13', 50, 1e-3, False)
+            model.train()
+
 
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
@@ -327,7 +409,7 @@ if __name__ == "__main__":
 
     # added params
     parser.add_argument("--blockname", type=str, default='layer-13')
-    parser.add_argument('--noise-time', type=int, default=121)
+    parser.add_argument('--time', type=int, default=121)
     parser.add_argument('--using-ema', action='store_true', default=False)
     parser.add_argument('--freezing-decoder', action='store_true', default=False)
     parser.add_argument(

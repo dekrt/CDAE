@@ -13,6 +13,7 @@ import enum
 from .diffusion_utils import discretized_gaussian_log_likelihood, normal_kl
 from pytorch_metric_learning import losses, miners, testers
 from pytorch_metric_learning.losses import SelfSupervisedLoss
+from info_nce import InfoNCE, info_nce
 
 
 def mean_flat(tensor):
@@ -733,7 +734,7 @@ class GaussianDiffusion:
             noise_positive = th.randn_like(x_start)
 
         x_t = self.q_sample(x_start, t, noise=noise)
-        x_t_positive = self.q_sample(x_start, t, noise=noise_positive)
+        x_t_positive = self.q_sample(x_start, t // 2, noise=noise_positive)
 
         terms = {}
 
@@ -754,7 +755,9 @@ class GaussianDiffusion:
 
             feat = acts['layer-13'].float().mean(dim=1)
             feat_positive = acts_positive['layer-13'].float().mean(dim=1)
-            loss_fn_contrastive = SelfSupervisedLoss(losses.TripletMarginLoss())
+            # loss_fn_contrastive = SelfSupervisedLoss(losses.TripletMarginLoss())
+            # loss_contrastive = loss_fn_contrastive(feat, feat_positive)
+            loss_fn_contrastive = InfoNCE()
             loss_contrastive = loss_fn_contrastive(feat, feat_positive)
             terms['contrastive'] = loss_contrastive
 

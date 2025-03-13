@@ -5,6 +5,8 @@ import numpy as np
 from functools import partial
 
 import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 import torch.distributed as dist
 from torch.cuda.amp import autocast as autocast
 import torch.nn as nn
@@ -12,49 +14,46 @@ from torch.utils.data import Dataset
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 from torch.cuda.amp import autocast as autocast
+from torchvision.datasets import ImageFolder
+from torchvision import transforms
+from PIL import Image
+
 
 from diffusion import create_diffusion
 from download import find_model
 from models import DiT_XL_2
+from diffusers.models import AutoencoderKL
+
 import sys
 sys.path.append("..") 
 from utils import init_seeds, gather_tensor, DataLoaderDDP, print0
 
 
-class LatentCodeDataset(Dataset):
-    # warning: needs A LOT OF memory to load these datasets !
-    def __init__(self, dataset, train=True, num_copies=10):
-        if train:
-            code_path = [f"latent_codes/{dataset}/train_code_{i}.npy" for i in range(num_copies)]
-            label_path = f"latent_codes/{dataset}/train_label.npy"
-        else:
-            code_path = [f"latent_codes/{dataset}/test_code_0.npy"]
-            label_path = f"latent_codes/{dataset}/test_label.npy"
+def center_crop_arr(pil_image, image_size):
+    """
+    Center cropping implementation from ADM.
+    https://github.com/openai/guided-diffusion/blob/8fb3ad9197f16bbc40620447b2742e13458d2831/guided_diffusion/image_datasets.py#L126
+    """
+    while min(*pil_image.size) >= 2 * image_size:
+        pil_image = pil_image.resize(
+            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
+        )
 
-        self.code = []
-        for p in code_path:
-            with open(p, 'rb') as f:
-                data = np.load(f)
-                self.code.append(data)
-        with open(label_path, 'rb') as f:
-            self.label = np.load(f)
+    scale = image_size / min(*pil_image.size)
+    pil_image = pil_image.resize(
+        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
+    )
 
-        print0(f"Code shape: {len(self.code)} x {self.code[0].shape}")
-        print0("Label shape:", self.label.shape)
-
-    def __getitem__(self, index):
-        replica = random.randrange(len(self.code))
-        code = self.code[replica][index]
-        label = self.label[index]
-        return code, label
-
-    def __len__(self):
-        return len(self.code[0])
+    arr = np.array(pil_image)
+    crop_y = (arr.shape[0] - image_size) // 2
+    crop_x = (arr.shape[1] - image_size) // 2
+    return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
 
-def get_model(device):
+
+def get_model(device, ckpt_path):
     model = DiT_XL_2().to(device)
-    state_dict = find_model(f"DiT-XL-2-256x256.pt")
+    state_dict = find_model(ckpt_path if ckpt_path is not None else "DiT-XL-2-256x256.pt")
     # state_dict = find_model(f"/lpai/models/ditssl/25-03-04-1/DiT_epoch_1499.pth")
     model.load_state_dict(state_dict)
     model.eval()
@@ -85,7 +84,7 @@ def denoise_feature(code, model, timestep, blockname, use_amp):
     y_null = torch.tensor([1000] * x.shape[0], device=device)
 
     with torch.no_grad():
-        with autocast(enabled=use_amp):
+        with torch.amp.autocast('cuda', enabled=use_amp):
             _, acts = model(x_t, t, y_null, ret_activation=True)
         feat = acts[blockname].float().detach()
         # (-1, 256, 1152)
@@ -100,7 +99,11 @@ class Classifier(nn.Module):
         self.feat_func = feat_func
         self.loss_fn = nn.CrossEntropyLoss()
 
-        hidden_size = feat_func(next(iter(valid_loader))[0]).shape[-1]
+        # hidden_size = feat_func(next(iter(valid_loader))[0]).shape[-1]
+        sample_img = next(iter(valid_loader))[0].to(device)
+        with torch.no_grad():
+            sample_latent = vae.encode(sample_img).latent_dist.sample().mul_(0.18215)
+        hidden_size = feat_func(sample_latent).shape[-1]
         layers = nn.Sequential(
             # nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6),
             nn.Linear(hidden_size, num_classes),
@@ -141,7 +144,11 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
         preds = []
         labels = []
         for image, label in tqdm(valid_loader, disable=(local_rank!=0)):
-            pred = classifier.test(image.to(device))
+            image = image.to(device)
+            with torch.no_grad():
+                # Map input images to latent space + normalize latents:
+                x = vae.encode(image).latent_dist.sample().mul_(0.18215)
+            pred = classifier.test(x)
             preds.append(pred)
             labels.append(label.to(device))
 
@@ -158,7 +165,7 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
     DDP_multiplier = dist.get_world_size()
     print0("Using DDP, lr = %f * %d" % (base_lr, DDP_multiplier))
     base_lr *= DDP_multiplier
-    num_classes = 10 if opt.dataset == 'cifar' else 1000
+    num_classes = 10 if args.dataset == 'cifar' else 1000
 
     classifier = Classifier(feat_func, base_lr, epoch, num_classes).to(device)
 
@@ -167,10 +174,12 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
         pbar = tqdm(train_loader, disable=(local_rank!=0))
         for i, (image, label) in enumerate(pbar):
             pbar.set_description("[epoch %d / iter %d]: lr: %.1e" % (e, i, classifier.get_lr()))
-            classifier.train(image.to(device), label.to(device))
+            image = image.to(device)
+            with torch.no_grad():
+                # Map input images to latent space + normalize latents:
+                x = vae.encode(image).latent_dist.sample().mul_(0.18215)
+            classifier.train(x, label.to(device))
         classifier.schedule_step()
-        # if (e + 1) % 5 == 0:
-        #     save_model(model, e, path="model_checkpoint")
         acc = test()
         if 'LOCAL_RANK' not in os.environ or int(os.environ['LOCAL_RANK']) == 0:
             print0(f"Test acc in epoch {e}: {acc * 100}")
@@ -181,53 +190,72 @@ def get_default_time(dataset, t):
     if t > 0:
         return t
     else:
-        return {'cifar': 121, 'tiny': 81}[dataset]
+        return {'cifar': 121, 'imagenet': 81}[dataset]
 
 
 def get_default_name(dataset, b):
     if b != 'layer-0':
         return b
     else:
-        return {'cifar': 'layer-13', 'tiny': 'layer-13'}[dataset]
+        return {'cifar': 'layer-13', 'imagenet': 'layer-13'}[dataset]
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default='cifar', type=str, choices=['cifar', 'tiny'])
+    parser.add_argument("--train-data-path", type=str, required=True)
+    parser.add_argument("--val-data-path", type=str, required=True)
+    parser.add_argument("--dataset", default='cifar', type=str, choices=['cifar', 'imagenet'])
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='node rank for distributed training')
-    parser.add_argument("--use_amp", action='store_true', default=False)
-    parser.add_argument('--batch_size', default=128, type=int)
+    parser.add_argument("--use-amp", action='store_true', default=False)
+    parser.add_argument('--batch-size', default=128, type=int)
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--epoch', default=30, type=int)
     parser.add_argument('--time', type=int, default=0)
     parser.add_argument('--name', type=str, default='layer-0')
-    opt = parser.parse_args()
+    parser.add_argument(
+        "--ckpt", type=str, default=None,
+        help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model)."
+    )
+    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
+    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
 
-    # local_rank = opt.local_rank
+    args = parser.parse_args()
+
     local_rank = int(os.environ["LOCAL_RANK"])
     init_seeds(no=local_rank)
     dist.init_process_group(backend='nccl')
     torch.cuda.set_device(local_rank)
     device = "cuda:%d" % local_rank
-    model, diffusion = get_model(device)
+    model, diffusion = get_model(device, args.ckpt)
+    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
 
-    train_set = LatentCodeDataset(opt.dataset, train=True)
-    valid_set = LatentCodeDataset(opt.dataset, train=False)
+
+
+    # Setup data:
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+    ])
+    train_set = ImageFolder(args.train_data_path, transform=transform)
+    valid_set = ImageFolder(args.val_data_path, transform=transform)
     train_loader, sampler = DataLoaderDDP(
         train_set,
-        batch_size=opt.batch_size,
+        batch_size=args.batch_size,
         shuffle=True,
     )
     valid_loader, _ = DataLoaderDDP(
         valid_set,
-        batch_size=opt.batch_size,
+        batch_size=args.batch_size,
         shuffle=False,
     )
 
     # default timestep & blockname values
-    opt.time = get_default_time(opt.dataset, opt.time)
-    opt.name = get_default_name(opt.dataset, opt.name)
+    args.time = get_default_time(args.dataset, args.time)
+    args.name = get_default_name(args.dataset, args.name)
 
-    print0(opt)
-    train(model, timestep=opt.time, blockname=opt.name, epoch=opt.epoch, base_lr=opt.lr, use_amp=opt.use_amp)
+    print0(args)
+    train(model, timestep=args.time, blockname=args.name, epoch=args.epoch, base_lr=args.lr, use_amp=args.use_amp)
