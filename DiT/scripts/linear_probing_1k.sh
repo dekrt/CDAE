@@ -1,6 +1,6 @@
-CUDA_VISIBLE_DEVICES=5,6 torchrun \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
   --nnodes=1 \
-  --nproc_per_node=2 \
+  --nproc_per_node=8 \
   linear_probing.py \
   --train-data-path /lpai/dataset/imagenet-1k/0-1-0/train \
   --val-data-path /lpai/dataset/imagenet-1k/0-1-0/ILSVRC2012/val \
