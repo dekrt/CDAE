@@ -1,3 +1,0 @@
-[[34m2025-03-12 12:13:42[0m] Experiment directory created at results/002-DiT-XL-2
-[[34m2025-03-12 12:14:17[0m] DiT Parameters: 675,129,632
-[[34m2025-03-12 12:14:18[0m] Dataset contains 50,000 images (None)

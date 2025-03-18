@@ -233,6 +233,8 @@ def main(args):
     train_steps = 0
     log_steps = 0
     running_loss = 0
+    running_mse_loss = 0
+    running_contrastive_loss = 0
     start_time = time()
 
 
@@ -246,14 +248,17 @@ def main(args):
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
                 x = vae.encode(x).latent_dist.sample().mul_(0.18215)
-            t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
+            if args.fixed_timesteps:
+                t = torch.randint(500, 900, (x.shape[0],), device=device)
+            else:
+                t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y, ret_activation=True)
             loss_dict= diffusion.training_losses(model, x, t, model_kwargs)
         
 
-            loss_noise = loss_dict["loss"].mean()
+            loss_mse = loss_dict["loss"].mean()
             loss_contrastive = loss_dict["contrastive"]
-            loss = loss_noise + loss_contrastive
+            loss = loss_mse + loss_contrastive
             # print(f"epoch {epoch}: loss = {loss}, loss_noise = {loss_noise}, loss_contrastive = {loss_contrastive}")
 
             opt.zero_grad()
@@ -264,6 +269,9 @@ def main(args):
 
             # Log loss values:
             running_loss += loss.item()
+            running_mse_loss += loss_mse.item()
+            running_contrastive_loss += loss_contrastive.item()
+
             log_steps += 1
             train_steps += 1
             if train_steps % args.log_every == 0:
@@ -273,11 +281,28 @@ def main(args):
                 steps_per_sec = log_steps / (end_time - start_time)
                 # Reduce loss history over all processes:
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
+                avg_mse_loss = torch.tensor(running_mse_loss / log_steps, device=device)
+                avg_contrastive_loss = torch.tensor(running_contrastive_loss / log_steps, device=device)
+
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
+                dist.all_reduce(avg_mse_loss, op=dist.ReduceOp.SUM)
+                dist.all_reduce(avg_contrastive_loss, op=dist.ReduceOp.SUM)
+
                 avg_loss = avg_loss.item() / dist.get_world_size()
-                logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                avg_mse_loss = avg_mse_loss.item() / dist.get_world_size()
+                avg_contrastive_loss = avg_contrastive_loss.item() / dist.get_world_size()
+
+                logger.info(
+                    f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, "
+                    f"noise_loss: {avg_mse_loss:.4f}, "
+                    f"contrastive_loss: {avg_contrastive_loss:.4f}, "
+                    f"Train Steps/Sec: {steps_per_sec:.2f}"
+                )
+
                 # Reset monitoring variables:
                 running_loss = 0
+                running_mse_loss = 0
+                running_contrastive_loss = 0
                 log_steps = 0
                 start_time = time()
 
@@ -301,7 +326,22 @@ def main(args):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                 dist.barrier()
-
+    if args.using_ema:
+        checkpoint = {
+            "model": model.module.state_dict(),
+            "ema": ema.state_dict(),
+            "opt": opt.state_dict(),
+            "args": args
+        }
+    else:
+        checkpoint = {
+            "model": model.module.state_dict(),
+            "opt": opt.state_dict(),
+            "args": args
+        }
+    # save final model
+    final_checkpoint_path = f"{args.results_dir}/final.pt"
+    torch.save(checkpoint, final_checkpoint_path)
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
 
@@ -330,6 +370,8 @@ if __name__ == "__main__":
     parser.add_argument('--noise-time', type=int, default=121)
     parser.add_argument('--using-ema', action='store_true', default=False)
     parser.add_argument('--freezing-decoder', action='store_true', default=False)
+    parser.add_argument('--fixed-timesteps', action='store_true', default=False)
+
     parser.add_argument(
         "--ckpt", type=str, default=None,
         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model)."

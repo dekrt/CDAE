@@ -13,7 +13,9 @@ import enum
 from .diffusion_utils import discretized_gaussian_log_likelihood, normal_kl
 from pytorch_metric_learning import losses, miners, testers
 from pytorch_metric_learning.losses import SelfSupervisedLoss
-from info_nce import InfoNCE, info_nce
+# from info_nce import InfoNCE, info_nce
+from .info_nce_loss import InfoNCE, info_nce
+
 
 
 def mean_flat(tensor):
@@ -751,12 +753,13 @@ class GaussianDiffusion:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output, acts = model(x_t, t, **model_kwargs)
-            _, acts_positive = model(x_t_positive, t, **model_kwargs)
+            _, acts_positive = model(x_t_positive, t // 2, **model_kwargs)
 
-            feat = acts['layer-13'].float().mean(dim=1)
-            feat_positive = acts_positive['layer-13'].float().mean(dim=1)
-            # loss_fn_contrastive = SelfSupervisedLoss(losses.TripletMarginLoss())
-            # loss_contrastive = loss_fn_contrastive(feat, feat_positive)
+            feat = acts['layer-13'].float().mean(dim=1) # (-1, 256, 1152) -> (-1, 1152), 
+            feat_positive = acts_positive['layer-13'].float().mean(dim=1) # (-1, 256, 1152) -> (-1, 1152)
+            # weight = 1 - 0.0005 / 2 * t
+            
+
             loss_fn_contrastive = InfoNCE()
             loss_contrastive = loss_fn_contrastive(feat, feat_positive)
             terms['contrastive'] = loss_contrastive

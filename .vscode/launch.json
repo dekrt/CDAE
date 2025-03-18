@@ -12,11 +12,12 @@
               "--nproc_per_node", "2",
               "/lpai/zxk/ddae/DiT/train_contrastive.py",
               "--model", "DiT-XL/2",
+              "--data-path", "/lpai/dataset/imagenet-1k/0-1-0/train",
               "--ckpt", "/lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt",
               // "--num-classes", "10",
-              // "--freezing-decoder",
+              "--freezing-decoder",
               "--global-batch-size", "64",
-              "--epochs", "600"
+              "--epochs", "30"
               // "--results-dir", "/lpai/output/models"
           ],
           "env": {
