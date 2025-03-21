@@ -14,7 +14,7 @@ from torch.utils.data import Dataset
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 from torch.cuda.amp import autocast as autocast
-from torchvision.datasets import ImageFolder
+from torchvision.datasets import ImageFolder, CIFAR10
 from torchvision import transforms
 from PIL import Image
 
@@ -77,7 +77,7 @@ def denoise_feature(code, model, timestep, blockname, use_amp):
         Returns:
             Collected feature map.
     '''
-    x = code.to(device)
+    x = code.to(device) # (-1, 4, 32, 32)
     t = torch.tensor([timestep]).to(device).repeat(x.shape[0])
     noise = torch.randn_like(x)
     x_t = diffusion.q_sample(x, t, noise=noise)
@@ -90,7 +90,7 @@ def denoise_feature(code, model, timestep, blockname, use_amp):
         # (-1, 256, 1152)
         # we average pool across the sequence dimension to extract
         # a 1152-dimensional vector of features per example
-        return feat.mean(dim=1)
+        return feat.mean(dim=1) # (-1, 1152)
 
 
 class Classifier(nn.Module):
@@ -202,8 +202,8 @@ def get_default_name(dataset, b):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train-data-path", type=str, required=True)
-    parser.add_argument("--val-data-path", type=str, required=True)
+    parser.add_argument("--train-data-path", type=str)
+    parser.add_argument("--val-data-path", type=str)
     parser.add_argument("--dataset", default='cifar', type=str, choices=['cifar', 'imagenet'])
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='node rank for distributed training')
@@ -230,18 +230,42 @@ if __name__ == "__main__":
     model, diffusion = get_model(device, args.ckpt)
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
 
-
-
     # Setup data:
-    transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
-    ])
-    train_set = ImageFolder(args.train_data_path, transform=transform)
-    valid_set = ImageFolder(args.val_data_path, transform=transform)
+    if args.dataset == 'imagenet':
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+        ])
+        train_set = ImageFolder(args.train_data_path, transform=transform)
+        valid_set = ImageFolder(args.val_data_path, transform=transform)
+    elif args.dataset == 'cifar':
+        normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        train_transform = transforms.Compose(
+            [
+                transforms.Resize(256), 
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
+        val_transform = transforms.Compose(
+            [
+                transforms.Resize(256),
+                transforms.ToTensor(),
+                normalize
+            ]
+        )
+
+        train_set = CIFAR10(root=args.train_data_path, train=True, transform=train_transform)
+        valid_set = CIFAR10(root=args.val_data_path, train=False, transform=val_transform)
+        
+
+
     train_loader, sampler = DataLoaderDDP(
         train_set,
         batch_size=args.batch_size,
