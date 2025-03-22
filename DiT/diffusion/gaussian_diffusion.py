@@ -733,11 +733,8 @@ class GaussianDiffusion:
             model_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
-            noise_positive = th.randn_like(x_start)
-
+            
         x_t = self.q_sample(x_start, t, noise=noise)
-        x_t_positive = self.q_sample(x_start, t // 2, noise=noise_positive)
-
         terms = {}
 
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
@@ -753,19 +750,10 @@ class GaussianDiffusion:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output, acts = model(x_t, t, **model_kwargs)
-            _, acts_positive = model(x_t_positive, t // 2, **model_kwargs)
 
             feat = acts['layer-13'].float().mean(dim=1) # (-1, 256, 1152) -> (-1, 1152), 
-            feat_positive = acts_positive['layer-13'].float().mean(dim=1) # (-1, 256, 1152) -> (-1, 1152)
-            # weight = 1 - 0.0005 / 2 * t
+            terms['feat'] = feat
             
-
-            loss_fn_contrastive = InfoNCE()
-            loss_contrastive = loss_fn_contrastive(feat, feat_positive)
-            terms['contrastive'] = loss_contrastive
-
-
-
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,

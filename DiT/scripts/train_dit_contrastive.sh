@@ -8,6 +8,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
   --epochs 30 \
   --results-dir /lpai/output/models \
   --freezing-decoder \
-  --fixed-timesteps \
+  --lambda-lr \
   --ckpt /lpai/inputs/models/ditssl-25-03-02-1/cdae/pretrained_models/DiT-XL-2-256x256.pt \
   # --ckpt /lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt \

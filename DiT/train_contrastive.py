@@ -32,10 +32,13 @@ from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 from download import find_model
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+
 
 
 from pytorch_metric_learning import losses, miners, testers
 from pytorch_metric_learning.losses import SelfSupervisedLoss
+from info_nce import InfoNCE, info_nce
 
 
 
@@ -165,10 +168,6 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
-
-    # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
-
     # Setup data:
     transform = transforms.Compose([
         transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
@@ -237,6 +236,27 @@ def main(args):
     running_contrastive_loss = 0
     start_time = time()
 
+    if args.lambda_lr:
+        base_lr = 5e-5  # 最大学习率
+        warmup_steps = 1000
+        total_steps = args.epochs * len(dataset) // args.global_batch_size  # 训练总步数
+
+        opt = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0)
+
+        # 定义 warmup + cosine 的调度器
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return step / warmup_steps
+            else:
+                # cosine decay: start from 1, decay to 0
+                progress = (step - warmup_steps) / (total_steps - warmup_steps)
+                return 0.5 * (1 + np.cos(np.pi * progress))
+
+        scheduler = LambdaLR(opt, lr_lambda)
+    else:
+        # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
+
 
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch in range(args.epochs):
@@ -248,22 +268,26 @@ def main(args):
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
                 x = vae.encode(x).latent_dist.sample().mul_(0.18215)
-            if args.fixed_timesteps:
-                t = torch.randint(500, 900, (x.shape[0],), device=device)
+            if args.modified_timesteps:
+                t = torch.randint(0, 100, (x.shape[0],), device=device)
             else:
                 t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y, ret_activation=True)
-            loss_dict= diffusion.training_losses(model, x, t, model_kwargs)
-        
+            loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
+            loss_dict_positive = diffusion.training_losses(model, x, t // 10, model_kwargs)
 
-            loss_mse = loss_dict["loss"].mean()
-            loss_contrastive = loss_dict["contrastive"]
+            # add contrastive loss
+            loss_fn_contrastive = InfoNCE()
+            loss_contrastive = loss_fn_contrastive(loss_dict['feat'], loss_dict_positive['feat'])
+
+            loss_mse = (loss_dict["loss"].mean() + loss_dict_positive["loss"].mean()) / 2
             loss = loss_mse + loss_contrastive
             # print(f"epoch {epoch}: loss = {loss}, loss_noise = {loss_noise}, loss_contrastive = {loss_contrastive}")
 
             opt.zero_grad()
             loss.backward()
             opt.step()
+            scheduler.step()
             if args.using_ema:
                 update_ema(ema, model.module)
 
@@ -291,12 +315,14 @@ def main(args):
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 avg_mse_loss = avg_mse_loss.item() / dist.get_world_size()
                 avg_contrastive_loss = avg_contrastive_loss.item() / dist.get_world_size()
+                current_lr = scheduler.get_last_lr()[0]
 
                 logger.info(
                     f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, "
                     f"noise_loss: {avg_mse_loss:.4f}, "
                     f"contrastive_loss: {avg_contrastive_loss:.4f}, "
-                    f"Train Steps/Sec: {steps_per_sec:.2f}"
+                    f"Train Steps/Sec: {steps_per_sec:.2f}, "
+                    f"LR: {current_lr:.6f}"
                 )
 
                 # Reset monitoring variables:
@@ -370,7 +396,8 @@ if __name__ == "__main__":
     parser.add_argument('--noise-time', type=int, default=121)
     parser.add_argument('--using-ema', action='store_true', default=False)
     parser.add_argument('--freezing-decoder', action='store_true', default=False)
-    parser.add_argument('--fixed-timesteps', action='store_true', default=False)
+    parser.add_argument('--modified_timesteps', action='store_true', default=False)
+    parser.add_argument('--lambda-lr', action='store_true', default=False)
 
     parser.add_argument(
         "--ckpt", type=str, default=None,
