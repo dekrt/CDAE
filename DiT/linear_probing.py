@@ -1,4 +1,5 @@
 import argparse
+from glob import glob
 import os
 import random
 import numpy as np
@@ -17,16 +18,36 @@ from torch.cuda.amp import autocast as autocast
 from torchvision.datasets import ImageFolder, CIFAR10
 from torchvision import transforms
 from PIL import Image
-
+import logging
 
 from diffusion import create_diffusion
 from download import find_model
 from models import DiT_XL_2
 from diffusers.models import AutoencoderKL
+from models import DiT_models
+
 
 import sys
 sys.path.append("..") 
 from utils import init_seeds, gather_tensor, DataLoaderDDP, print0
+
+
+def create_logger(logging_dir):
+    """
+    Create a logger that writes to a log file and stdout.
+    """
+    if dist.get_rank() == 0:  # real logger
+        logging.basicConfig(
+            level=logging.INFO,
+            format='[\033[34m%(asctime)s\033[0m] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            handlers=[logging.StreamHandler(), logging.FileHandler(f"{logging_dir}/log.txt")]
+        )
+        logger = logging.getLogger(__name__)
+    else:  # dummy logger (does nothing)
+        logger = logging.getLogger(__name__)
+        logger.addHandler(logging.NullHandler())
+    return logger
 
 
 def center_crop_arr(pil_image, image_size):
@@ -160,10 +181,10 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
         acc = (pred == label).sum().item() / len(label)
         return acc
 
-    print0(f"Feature extraction: time = {timestep}, name = {blockname}")
+    logger.info(f"Feature extraction: time = {timestep}, name = {blockname}")
     feat_func = partial(denoise_feature, model=model, timestep=timestep, blockname=blockname, use_amp=use_amp)
     DDP_multiplier = dist.get_world_size()
-    print0("Using DDP, lr = %f * %d" % (base_lr, DDP_multiplier))
+    logger.info("Using DDP, lr = %f * %d" % (base_lr, DDP_multiplier))
     base_lr *= DDP_multiplier
     num_classes = 10 if args.dataset == 'cifar' else 1000
 
@@ -182,7 +203,13 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
         classifier.schedule_step()
         acc = test()
         if 'LOCAL_RANK' not in os.environ or int(os.environ['LOCAL_RANK']) == 0:
-            print0(f"Test acc in epoch {e}: {acc * 100}")
+            logger.info(f"Test acc in epoch {e}: {acc * 100}")
+    
+    # save layers weights
+    if local_rank == 0:
+        classifier_path = os.path.join(checkpoint_dir, f"classifier_head.pth")
+        torch.save(classifier.classifier.module.state_dict(), classifier_path)
+        logger.info(f"Classifier head saved to {classifier_path}")
 
 
 
@@ -205,7 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--train-data-path", type=str)
     parser.add_argument("--val-data-path", type=str)
     parser.add_argument("--dataset", default='cifar', type=str, choices=['cifar', 'imagenet'])
-    parser.add_argument('--local_rank', default=-1, type=int,
+    parser.add_argument('--local-rank', default=-1, type=int,
                         help='node rank for distributed training')
     parser.add_argument("--use-amp", action='store_true', default=False)
     parser.add_argument('--batch-size', default=128, type=int)
@@ -219,12 +246,31 @@ if __name__ == "__main__":
     )
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
+    parser.add_argument("--results-dir", type=str, default="results")
+    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
+
+
 
     args = parser.parse_args()
 
     local_rank = int(os.environ["LOCAL_RANK"])
     init_seeds(no=local_rank)
     dist.init_process_group(backend='nccl')
+    if local_rank == 0:
+        os.makedirs(args.results_dir, exist_ok=True)
+        experiment_index = len(glob(f"{args.results_dir}/*"))
+        model_string_name = args.model.replace("/", "-")  # e.g., DiT-XL/2 --> DiT-XL-2 (for naming folders)
+        ckpt_string_name = args.ckpt.split('/')[-1].replace(".", "-") 
+        experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{model_string_name}-{ckpt_string_name}"  # Create an experiment folder
+        checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        logger = create_logger(experiment_dir)
+        logger.info(f"Experiment directory created at {experiment_dir}")
+    else:
+        logger = create_logger(None)
+
+
+    
     torch.cuda.set_device(local_rank)
     device = "cuda:%d" % local_rank
     model, diffusion = get_model(device, args.ckpt)
@@ -281,5 +327,5 @@ if __name__ == "__main__":
     args.time = get_default_time(args.dataset, args.time)
     args.name = get_default_name(args.dataset, args.name)
 
-    print0(args)
+    logger.info(args)
     train(model, timestep=args.time, blockname=args.name, epoch=args.epoch, base_lr=args.lr, use_amp=args.use_amp)

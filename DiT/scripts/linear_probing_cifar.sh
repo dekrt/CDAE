@@ -7,10 +7,12 @@ ckpts=(
   "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0150000.pt"
   "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0200000.pt"
   "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0250000.pt"
+  "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0300000.pt"
 )
 
 TRAIN_PATH="/lpai/dataset/cifar10-lhp/0-1-0/CIFAR10"
 VAL_PATH="/lpai/dataset/cifar10-lhp/0-1-0/CIFAR10"
+RESULTS_PATH="/lpai/output/models"
 BATCH_SIZE=256
 
 for ckpt in "${ckpts[@]}"
@@ -27,6 +29,7 @@ do
     --train-data-path "$TRAIN_PATH" \
     --val-data-path "$VAL_PATH" \
     --batch-size "$BATCH_SIZE" \
+    --results-dir "$RESULTS_PATH" \
     --ckpt "$ckpt"
 
   echo "Finished running ckpt: $ckpt"
