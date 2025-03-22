@@ -2,11 +2,11 @@
 
 ckpts=(
   "/lpai/inputs/models/ditssl-25-03-02-1/cdae/pretrained_models/DiT-XL-2-256x256.pt"
-  "/lpai/inputs/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0050000.pt"
-  "/lpai/inputs/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0100000.pt"
-  "/lpai/inputs/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0150000.pt"
-  "/lpai/inputs/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0200000.pt"
-  "/lpai/inputs/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0250000.pt"
+  "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0050000.pt"
+  "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0100000.pt"
+  "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0150000.pt"
+  "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0200000.pt"
+  "/lpai/inputs/models/ditssl-cadedit100ep/000-DiT-XL-2/checkpoints/0250000.pt"
 )
 
 TRAIN_PATH="/lpai/dataset/cifar10-lhp/0-1-0/CIFAR10"
