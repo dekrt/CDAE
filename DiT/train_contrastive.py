@@ -168,7 +168,7 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
-    # Setup data:
+    # Setup data(imagenet-1k):
     transform = transforms.Compose([
         transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
         transforms.RandomHorizontalFlip(),
@@ -279,7 +279,6 @@ def main(args):
             # add contrastive loss
             loss_fn_contrastive = InfoNCE()
             loss_contrastive = loss_fn_contrastive(loss_dict['feat'], loss_dict_positive['feat'])
-
             loss_mse = (loss_dict["loss"].mean() + loss_dict_positive["loss"].mean()) / 2
             loss = loss_mse + loss_contrastive
             # print(f"epoch {epoch}: loss = {loss}, loss_noise = {loss_noise}, loss_contrastive = {loss_contrastive}")
