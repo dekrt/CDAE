@@ -31,6 +31,7 @@ from models import DiT_models
 import sys
 sys.path.append("..") 
 from utils import init_seeds, gather_tensor, DataLoaderDDP, print0
+from datasets import TinyImageNet
 
 
 def create_logger(logging_dir):
@@ -218,21 +219,21 @@ def get_default_time(dataset, t):
     if t > 0:
         return t
     else:
-        return {'cifar': 121, 'imagenet': 81}[dataset]
+        return {'cifar': 121, 'imagenet': 81, 'tiny': 81}[dataset]
 
 
 def get_default_name(dataset, b):
     if b != 'layer-0':
         return b
     else:
-        return {'cifar': 'layer-13', 'imagenet': 'layer-13'}[dataset]
-
+        return {'cifar': 'layer-13', 'imagenet': 'layer-13', 'tiny': 'layer-13'}[dataset]
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--train-data-path", type=str)
     parser.add_argument("--val-data-path", type=str)
-    parser.add_argument("--dataset", default='cifar', type=str, choices=['cifar', 'imagenet'])
+    parser.add_argument("--dataset", default='cifar', type=str, choices=['cifar', 'imagenet', 'tiny'])
     parser.add_argument('--local-rank', default=-1, type=int,
                         help='node rank for distributed training')
     parser.add_argument("--use-amp", action='store_true', default=False)
@@ -261,8 +262,8 @@ if __name__ == "__main__":
         os.makedirs(args.results_dir, exist_ok=True)
         experiment_index = len(glob(f"{args.results_dir}/*"))
         model_string_name = args.model.replace("/", "-")  # e.g., DiT-XL/2 --> DiT-XL-2 (for naming folders)
-        ckpt_string_name = args.ckpt.split('/')[-1].replace(".", "-") 
-        experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{model_string_name}-{ckpt_string_name}"  # Create an experiment folder
+        ckpt_string_name = args.ckpt.split('/')[4].replace(".", "-") + '-' + args.ckpt.split('/')[-1].replace(".", "-") 
+        experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{ckpt_string_name}-{args.dataset}"  # Create an experiment folder
         checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
@@ -307,10 +308,25 @@ if __name__ == "__main__":
                 normalize
             ]
         )
-
         train_set = CIFAR10(root=args.train_data_path, train=True, transform=train_transform)
         valid_set = CIFAR10(root=args.val_data_path, train=False, transform=val_transform)
-        
+    elif args.dataset == 'tiny':
+        train_transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(256, 4),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+        ])
+        val_transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+        ])
+        train_set = TinyImageNet(root=args.train_data_path, train=True, transform=train_transform)
+        valid_set = TinyImageNet(root=args.val_data_path, train=False, transform=val_transform)
+    else:
+        raise ValueError(f"Dataset {args.dataset} not supported")
 
 
     train_loader, sampler = DataLoaderDDP(

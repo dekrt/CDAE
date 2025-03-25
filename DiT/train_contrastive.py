@@ -168,34 +168,40 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
-    # Setup data(imagenet-1k):
-    transform = transforms.Compose([
-        transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
-    ])
-    dataset = ImageFolder(args.data_path, transform=transform)
 
-    # # Using CIFAR10
-    # normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
-    # train_transform = transforms.Compose(
-    #     [
-    #         transforms.Resize(256), 
-    #         transforms.RandomHorizontalFlip(p=0.5),
-    #         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-    #         transforms.RandomGrayscale(p=0.2),
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ]
-    # )
-    # # dataset = CIFAR10(
-    # #     "/lpai/datasets/cifar10-lhp/versions/0.1.0/CIFAR10", train=True, download=False, transform=train_transform
-    # # )
 
-    # dataset = CIFAR10(
-    #     "/lpai/zxk/ddae/data", train=True, download=False, transform=train_transform
-    # )
+    if args.dataset == 'imagenet':
+        # Setup data(imagenet-1k):
+        transform = transforms.Compose([
+            transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+        ])
+        dataset = ImageFolder(args.data_path, transform=transform)
+    elif args.dataset == 'cifar':
+        normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        train_transform = transforms.Compose(
+            [
+                transforms.Resize(256), 
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
+        dataset = CIFAR10(
+            args.data_path, train=True, download=False, transform=train_transform
+        )
+        # dataset = CIFAR10(
+        #     "/lpai/zxk/ddae/data", train=True, download=False, transform=train_transform
+        # )
+    elif args.dataset == 'tiny':
+        pass
+    else:
+        raise ValueError(f"Dataset {args.dataset} not supported")
+        
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -397,6 +403,7 @@ if __name__ == "__main__":
     parser.add_argument('--freezing-decoder', action='store_true', default=False)
     parser.add_argument('--modified_timesteps', action='store_true', default=False)
     parser.add_argument('--lambda-lr', action='store_true', default=False)
+    parser.add_argument("--dataset", default='imagenet', type=str, choices=['cifar', 'imagenet', 'tiny'])
 
     parser.add_argument(
         "--ckpt", type=str, default=None,

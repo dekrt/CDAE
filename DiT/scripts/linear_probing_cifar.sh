@@ -13,7 +13,7 @@ ckpts=(
 TRAIN_PATH="/lpai/dataset/cifar10-lhp/0-1-0/CIFAR10"
 VAL_PATH="/lpai/dataset/cifar10-lhp/0-1-0/CIFAR10"
 RESULTS_PATH="/lpai/output/models"
-BATCH_SIZE=256
+BATCH_SIZE=384
 
 for ckpt in "${ckpts[@]}"
 do
