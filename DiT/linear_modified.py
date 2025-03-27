@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 import numpy as np
 from functools import partial
@@ -15,7 +16,6 @@ from torch.cuda.amp import autocast as autocast
 from diffusion import create_diffusion
 from download import find_model
 from models import DiT_XL_2
-import os
 import sys
 sys.path.append("..") 
 from utils import init_seeds, gather_tensor, DataLoaderDDP, print0
@@ -54,12 +54,19 @@ class LatentCodeDataset(Dataset):
 
 def get_model(device):
     model = DiT_XL_2().to(device)
-    # state_dict = find_model(f"DiT-XL-2-256x256.pt")
-    state_dict = find_model(f"/lpai/models/ditssl/v2/final.pt")
+    state_dict = find_model(f"DiT-XL-2-256x256.pt")
+    # state_dict = find_model(f"/lpai/models/ditssl/25-03-04-1/DiT_epoch_1499.pth")
     model.load_state_dict(state_dict)
     model.eval()
     diffusion = create_diffusion(None) # 1000-len betas
     return model, diffusion
+
+
+def save_model(model, epoch, path="checkpoint.pth"):
+    if local_rank == 0:  # Only save from one process (rank 0)
+        checkpoint_path = f"{path}_epoch_{epoch}.pth"
+        torch.save(model.state_dict(), checkpoint_path)
+        print0(f"Model saved to {checkpoint_path}")
 
 
 def denoise_feature(code, model, timestep, blockname, use_amp):
@@ -151,7 +158,7 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
     DDP_multiplier = dist.get_world_size()
     print0("Using DDP, lr = %f * %d" % (base_lr, DDP_multiplier))
     base_lr *= DDP_multiplier
-    num_classes = 10 if opt.dataset == 'cifar' else 200
+    num_classes = 10 if opt.dataset == 'cifar' else 1000
 
     classifier = Classifier(feat_func, base_lr, epoch, num_classes).to(device)
 
@@ -162,11 +169,12 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
             pbar.set_description("[epoch %d / iter %d]: lr: %.1e" % (e, i, classifier.get_lr()))
             classifier.train(image.to(device), label.to(device))
         classifier.schedule_step()
+        # if (e + 1) % 5 == 0:
+        #     save_model(model, e, path="model_checkpoint")
         acc = test()
-        print0("Test acc: %.2f" % (acc * 100))
-    print("finish training")
-    acc = test()
-    print0("Test acc: %.2f" % (acc * 100))
+        if 'LOCAL_RANK' not in os.environ or int(os.environ['LOCAL_RANK']) == 0:
+            print0(f"Test acc in epoch {e}: {acc * 100}")
+
 
 
 def get_default_time(dataset, t):
@@ -196,6 +204,7 @@ if __name__ == "__main__":
     parser.add_argument('--name', type=str, default='layer-0')
     opt = parser.parse_args()
 
+    # local_rank = opt.local_rank
     local_rank = int(os.environ["LOCAL_RANK"])
     init_seeds(no=local_rank)
     dist.init_process_group(backend='nccl')

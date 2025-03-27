@@ -188,7 +188,12 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
     DDP_multiplier = dist.get_world_size()
     logger.info("Using DDP, lr = %f * %d" % (base_lr, DDP_multiplier))
     base_lr *= DDP_multiplier
-    num_classes = 10 if args.dataset == 'cifar' else 1000
+    if args.dataset == 'cifar':
+        num_classes = 10
+    elif args.dataset == 'tiny':
+        num_classes = 200
+    elif args.dataset == 'imagenet':
+        num_classes == 1000
 
     classifier = Classifier(feat_func, base_lr, epoch, num_classes).to(device)
 
@@ -280,41 +285,46 @@ if __name__ == "__main__":
 
     # Setup data:
     if args.dataset == 'imagenet':
-        transform = transforms.Compose([
-            transforms.Resize(256),
+        train_transform = transforms.Compose([
             transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
         ])
-        train_set = ImageFolder(args.train_data_path, transform=transform)
-        valid_set = ImageFolder(args.val_data_path, transform=transform)
+        val_transform = transforms.Compose(
+            [
+                transforms.Resize(256),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+            ]
+        )
+        train_set = ImageFolder(args.train_data_path, transform=train_transform)
+        valid_set = ImageFolder(args.val_data_path, transform=val_transform)
     elif args.dataset == 'cifar':
-        normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        # normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         train_transform = transforms.Compose(
             [
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, 4),
                 transforms.Resize(256), 
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-                transforms.RandomGrayscale(p=0.2),
                 transforms.ToTensor(),
-                normalize,
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
             ]
         )
         val_transform = transforms.Compose(
             [
                 transforms.Resize(256),
                 transforms.ToTensor(),
-                normalize
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
             ]
         )
         train_set = CIFAR10(root=args.train_data_path, train=True, transform=train_transform)
         valid_set = CIFAR10(root=args.val_data_path, train=False, transform=val_transform)
     elif args.dataset == 'tiny':
         train_transform = transforms.Compose([
-            transforms.Resize(256),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(256, 4),
+            transforms.RandomCrop(64, 4),
+            transforms.Resize(256),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
         ])

@@ -1,16 +1,9 @@
 #!/bin/bash
 
 ckpts=(
-  "/lpai/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0050000.pt"
-  "/lpai/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0100000.pt"
-  "/lpai/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0150000.pt"
-  "/lpai/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0200000.pt"
-  "/lpai/models/ditssl/cadedit100ep/000-DiT-XL-2/checkpoints/0250000.pt"
+  "/lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt"
+  "/lpai/models/ditssl/v2/final.pt"
 )
-
-TRAIN_PATH="/lpai/zxk/ddae/DiT/dataset"
-VAL_PATH="/lpai/zxk/ddae/DiT/dataset"
-BATCH_SIZE=256
 
 for ckpt in "${ckpts[@]}"
 do
@@ -18,16 +11,17 @@ do
   echo "Running with ckpt: $ckpt"
   echo "=============================="
 
-  CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun \
-    --nnodes=1 \
-    --nproc_per_node=4 \
-    linear_probing.py \
-    --dataset cifar \
-    --train-data-path "$TRAIN_PATH" \
-    --val-data-path "$VAL_PATH" \
-    --batch-size "$BATCH_SIZE" \
-    --ckpt "$ckpt"\
-    --epoch 1 
+  CUDA_VISIBLE_DEVICES=0,1 torchrun \
+  --nnodes=1 \
+  --nproc_per_node=2 \
+  linear_probing.py \
+  --dataset cifar \
+  --train-data-path /lpai/zxk/ddae/DiT/dataset \
+  --val-data-path /lpai/zxk/ddae/DiT/dataset \
+  --batch-size 128 \
+  --results-dir /lpai/output/models \
+  --ckpt "$ckpt" \
+  --use-amp \
 
   echo "Finished running ckpt: $ckpt"
   echo ""

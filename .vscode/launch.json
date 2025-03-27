@@ -38,17 +38,57 @@
               "--nnodes", "1",
               "--nproc_per_node", "2",
               "/lpai/zxk/ddae/DiT/linear_probing.py",
-              "--train-data-path", "/lpai/dataset/imagenet-1k/0-1-0/train",
-              "--val-data-path", "/lpai/dataset/imagenet-1k/0-1-0/ILSVRC2012/val",
-              "--dataset", "imagenet",
+              "--train-data-path", "/lpai/zxk/ddae/DiT/dataset",
+              "--val-data-path", "/lpai/zxk/ddae/DiT/dataset",
+              "--dataset", "cifar",
               "--ckpt", "/lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt"
           ],
           "env": {
               "CUDA_VISIBLE_DEVICES": "0,1",
-              "PYTHONPATH": "/lpai/zxk/ddae/DiT"
+              "PYTHONPATH": "/lpai/zxk/ddae"
           },
-          "cwd": "/lpai/zxk/ddae/DiT"
-          // "justMyCode": false
-      }
+          "cwd": "/lpai/zxk/ddae"
+      },
+      {
+        "name": "Python: linear.py",
+        "type": "debugpy",
+        "request": "launch",
+        "console": "integratedTerminal",
+        "module": "torch.distributed.run",
+        "args": [
+            "--nnodes", "1",
+            "--nproc_per_node", "2",
+            "/lpai/zxk/ddae/DiT/linear.py",
+            "--train-data-path", "/lpai/zxk/ddae/DiT/dataset",
+            "--val-data-path", "/lpai/zxk/ddae/DiT/dataset",
+            "--dataset", "cifar",
+            "--ckpt", "/lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt"
+        ],
+        "env": {
+            "CUDA_VISIBLE_DEVICES": "0,1",
+            "PYTHONPATH": "/lpai/zxk/ddae"
+        },
+        "cwd": "/lpai/zxk/ddae"
+    },
+    {
+        "name": "Python: vae_preprocessing.py",
+        "type": "debugpy",
+        "request": "launch",
+        "console": "integratedTerminal",
+        "module": "torch.distributed.run",
+        "args": [
+            "--nnodes", "1",
+            "--nproc_per_node", "2",
+            "/lpai/zxk/ddae/DiT/vae_preprocessing.py",
+            "--dataset", "cifar",
+            "--use_amp"
+        ],
+        "env": {
+            "CUDA_VISIBLE_DEVICES": "0,1",
+            "PYTHONPATH": "/lpai/zxk/ddae"
+        },
+        "cwd": "/lpai/zxk/ddae"
+    }
+
   ]
 }

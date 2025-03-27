@@ -1,5 +1,6 @@
 import argparse
 import os
+from time import sleep
 from tqdm import tqdm
 import numpy as np
 
@@ -22,7 +23,8 @@ def show(imgs, title="debug.png"):
 
 def main(opt):
     name = opt.dataset
-    local_rank = opt.local_rank
+    local_rank = int(os.environ["LOCAL_RANK"])
+
     num_copies = opt.num_copies
     use_amp = opt.use_amp
 
@@ -61,6 +63,8 @@ def main(opt):
                 y = y.to(device)
                 with autocast(enabled=use_amp):
                     code = encode(x).float()
+                    print(x.shape, y.shape, code.shape)
+                    sleep(10)
                     if local_rank == 0 and i == 0:
                         # for visualization and debugging
                         recon = decode(code).float()
@@ -95,7 +99,8 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     print0(opt)
 
-    init_seeds(no=opt.local_rank)
+    local_rank = int(os.environ["LOCAL_RANK"])
+    init_seeds(no=local_rank)
     dist.init_process_group(backend='nccl')
-    torch.cuda.set_device(opt.local_rank)
+    torch.cuda.set_device(local_rank)
     main(opt)
