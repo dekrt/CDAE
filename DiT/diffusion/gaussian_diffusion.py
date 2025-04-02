@@ -749,11 +749,6 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-            model_output, acts = model(x_t, t, **model_kwargs)
-
-            feat = acts['layer-13'].float().mean(dim=1) # (-1, 256, 1152) -> (-1, 1152), 
-            terms['feat'] = feat
-            
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,

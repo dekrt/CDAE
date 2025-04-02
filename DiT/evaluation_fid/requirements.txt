@@ -1,0 +1,11 @@
+asposestorage==1.0.2
+diffusers==0.32.2
+diffusion==6.11.5
+download==0.3.5
+numpy==2.2.4
+Pillow==11.2.0
+Requests==2.32.3
+scipy==1.15.2
+tensorflow_gpu==2.9.3
+torch==2.6.0
+tqdm==4.67.1

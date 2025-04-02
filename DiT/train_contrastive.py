@@ -18,12 +18,13 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchvision.datasets import ImageFolder, CIFAR10
 from torchvision import transforms
+import torch.nn.functional as F
 import numpy as np
 from collections import OrderedDict
 from PIL import Image
 from copy import deepcopy
 from glob import glob
-from time import time
+from time import sleep, time
 import argparse
 import logging
 import os
@@ -167,6 +168,16 @@ def main(args):
     model = DDP(model.to(device), device_ids=[rank], find_unused_parameters=True)
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+
+    # MLP projection
+    proj_head = nn.Sequential(
+        nn.Linear(1152, 4096),
+        nn.GELU(),
+        nn.Linear(4096, 256)
+    )
+    proj_head = DDP(proj_head.to(device), device_ids=[rank])
+
+
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
 
@@ -194,9 +205,6 @@ def main(args):
         dataset = CIFAR10(
             args.data_path, train=True, download=False, transform=train_transform
         )
-        # dataset = CIFAR10(
-        #     "/lpai/zxk/ddae/data", train=True, download=False, transform=train_transform
-        # )
     elif args.dataset == 'tiny':
         pass
     else:
@@ -247,7 +255,11 @@ def main(args):
         warmup_steps = 1000
         total_steps = args.epochs * len(dataset) // args.global_batch_size  # 训练总步数
 
-        opt = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0)
+        opt = torch.optim.AdamW(
+            list(model.parameters()) + list(proj_head.parameters()), 
+            lr=base_lr, 
+            weight_decay=0
+            )
 
         # 定义 warmup + cosine 的调度器
         def lr_lambda(step):
@@ -282,9 +294,13 @@ def main(args):
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
             loss_dict_positive = diffusion.training_losses(model, x, t // 10, model_kwargs)
 
+            # projection
+            feat = proj_head(loss_dict['feat'])
+            feat_positive = proj_head(loss_dict_positive['feat'])
+            
             # add contrastive loss
             loss_fn_contrastive = InfoNCE()
-            loss_contrastive = loss_fn_contrastive(loss_dict['feat'], loss_dict_positive['feat'])
+            loss_contrastive = loss_fn_contrastive(feat, feat_positive)
             loss_mse = (loss_dict["loss"].mean() + loss_dict_positive["loss"].mean()) / 2
             loss = loss_mse + loss_contrastive
             # print(f"epoch {epoch}: loss = {loss}, loss_noise = {loss_noise}, loss_contrastive = {loss_contrastive}")
