@@ -82,7 +82,7 @@ def create_logger(logging_dir):
     if dist.get_rank() == 0:  # real logger
         logging.basicConfig(
             level=logging.INFO,
-            format='[\033[34m%(asctime)s\033[0m] %(message)s',
+            format='[%(asctime)s] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S',
             handlers=[logging.StreamHandler(), logging.FileHandler(f"{logging_dir}/log.txt")]
         )
@@ -112,6 +112,32 @@ def center_crop_arr(pil_image, image_size):
     crop_y = (arr.shape[0] - image_size) // 2
     crop_x = (arr.shape[1] - image_size) // 2
     return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
+
+def vicreg_loss(x, y, sim_coeff=25.0, std_coeff=25.0, cov_coeff=1.0, eps=1e-4):
+    """
+    x, y: [B, D] embeddings from two views
+    Returns VICReg loss: sim_loss + std_loss + cov_loss
+    """
+    # Invariance loss (MSE)
+    sim_loss = F.mse_loss(x, y)
+
+    # Variance loss
+    std_x = torch.sqrt(x.var(dim=0) + eps)
+    std_y = torch.sqrt(y.var(dim=0) + eps)
+    std_loss = torch.mean(F.relu(1.0 - std_x)) + torch.mean(F.relu(1.0 - std_y))
+
+    # Covariance loss
+    x = x - x.mean(dim=0)
+    y = y - y.mean(dim=0)
+    cov_x = (x.T @ x) / (x.shape[0] - 1)
+    cov_y = (y.T @ y) / (y.shape[0] - 1)
+
+    cov_loss_x = (cov_x.fill_diagonal_(0) ** 2).sum() / x.shape[1]
+    cov_loss_y = (cov_y.fill_diagonal_(0) ** 2).sum() / y.shape[1]
+    cov_loss = cov_loss_x + cov_loss_y
+
+    return sim_coeff * sim_loss + std_coeff * std_loss + cov_coeff * cov_loss
+
 
 
 #################################################################################
@@ -248,6 +274,7 @@ def main(args):
     running_loss = 0
     running_mse_loss = 0
     running_contrastive_loss = 0
+    running_vic_loss = 0
     start_time = time()
 
     if args.lambda_lr:
@@ -299,10 +326,17 @@ def main(args):
             feat_positive = proj_head(loss_dict_positive['feat'])
             
             # add contrastive loss
-            loss_fn_contrastive = InfoNCE()
-            loss_contrastive = loss_fn_contrastive(feat, feat_positive)
             loss_mse = (loss_dict["loss"].mean() + loss_dict_positive["loss"].mean()) / 2
-            loss = loss_mse + loss_contrastive
+
+            if args.loss_type == 'infonce':
+                loss_fn_contrastive = InfoNCE()
+                loss_contrastive = loss_fn_contrastive(feat, feat_positive)
+                loss = loss_mse + loss_contrastive
+            elif args.loss_type == 'vicreg':
+                loss_vicreg = vicreg_loss(feat, feat_positive, sim_coeff=1.0, std_coeff=1.0, cov_coeff=0.1)
+                loss = loss_mse + loss_vicreg
+
+
             # print(f"epoch {epoch}: loss = {loss}, loss_noise = {loss_noise}, loss_contrastive = {loss_contrastive}")
 
             opt.zero_grad()
@@ -315,7 +349,10 @@ def main(args):
             # Log loss values:
             running_loss += loss.item()
             running_mse_loss += loss_mse.item()
-            running_contrastive_loss += loss_contrastive.item()
+            if args.loss_type == 'infonce':
+                running_contrastive_loss += loss_contrastive.item()
+            elif args.loss_type == 'vicreg':
+                running_vic_loss += loss_vicreg.item()
 
             log_steps += 1
             train_steps += 1
@@ -327,29 +364,45 @@ def main(args):
                 # Reduce loss history over all processes:
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
                 avg_mse_loss = torch.tensor(running_mse_loss / log_steps, device=device)
-                avg_contrastive_loss = torch.tensor(running_contrastive_loss / log_steps, device=device)
+
+                if args.loss_type == 'infonce':
+                    avg_contrastive_loss = torch.tensor(running_contrastive_loss / log_steps, device=device)
+                    dist.all_reduce(avg_contrastive_loss, op=dist.ReduceOp.SUM)
+                    avg_contrastive_loss = avg_contrastive_loss.item() / dist.get_world_size()
+                elif args.loss_type == 'vicreg':
+                    avg_vic_loss = torch.tensor(running_vic_loss / log_steps, device=device)
+                    dist.all_reduce(avg_vic_loss, op=dist.ReduceOp.SUM)
+                    avg_vic_loss = avg_vic_loss.item() / dist.get_world_size()
 
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 dist.all_reduce(avg_mse_loss, op=dist.ReduceOp.SUM)
-                dist.all_reduce(avg_contrastive_loss, op=dist.ReduceOp.SUM)
 
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 avg_mse_loss = avg_mse_loss.item() / dist.get_world_size()
-                avg_contrastive_loss = avg_contrastive_loss.item() / dist.get_world_size()
                 current_lr = scheduler.get_last_lr()[0]
-
-                logger.info(
-                    f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, "
-                    f"noise_loss: {avg_mse_loss:.4f}, "
-                    f"contrastive_loss: {avg_contrastive_loss:.4f}, "
-                    f"Train Steps/Sec: {steps_per_sec:.2f}, "
-                    f"LR: {current_lr:.6f}"
-                )
+                if args.loss_type == 'infonce':
+                    logger.info(
+                        f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, "
+                        f"mse_loss: {avg_mse_loss:.4f}, "
+                        f"contrastive_loss: {avg_contrastive_loss:.4f}, "
+                        f"Train Steps/Sec: {steps_per_sec:.2f}, "
+                        f"LR: {current_lr:.6f}"
+                    )
+                elif args.loss_type == 'vicreg':
+                    logger.info(
+                        f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, "
+                        f"mse_loss: {avg_mse_loss:.4f}, "
+                        f"vicreg_loss: {avg_vic_loss:.4f}, "
+                        f"Train Steps/Sec: {steps_per_sec:.2f}, "
+                        f"LR: {current_lr:.6f}"
+                    )
 
                 # Reset monitoring variables:
                 running_loss = 0
                 running_mse_loss = 0
                 running_contrastive_loss = 0
+                running_vic_loss = 0
+
                 log_steps = 0
                 start_time = time()
 
@@ -359,6 +412,7 @@ def main(args):
                     if args.using_ema:
                         checkpoint = {
                             "model": model.module.state_dict(),
+                            "proj_head": proj_head.module.state_dict(),
                             "ema": ema.state_dict(),
                             "opt": opt.state_dict(),
                             "args": args
@@ -366,6 +420,7 @@ def main(args):
                     else:
                         checkpoint = {
                             "model": model.module.state_dict(),
+                            "proj_head": proj_head.module.state_dict(),
                             "opt": opt.state_dict(),
                             "args": args
                         }
@@ -376,6 +431,7 @@ def main(args):
     if args.using_ema:
         checkpoint = {
             "model": model.module.state_dict(),
+            "proj_head": proj_head.module.state_dict(),
             "ema": ema.state_dict(),
             "opt": opt.state_dict(),
             "args": args
@@ -383,6 +439,7 @@ def main(args):
     else:
         checkpoint = {
             "model": model.module.state_dict(),
+            "proj_head": proj_head.module.state_dict(),
             "opt": opt.state_dict(),
             "args": args
         }
@@ -420,6 +477,8 @@ if __name__ == "__main__":
     parser.add_argument('--modified_timesteps', action='store_true', default=False)
     parser.add_argument('--lambda-lr', action='store_true', default=False)
     parser.add_argument("--dataset", default='imagenet', type=str, choices=['cifar', 'imagenet', 'tiny'])
+    parser.add_argument("--loss-type", type=str, choices=['infonce', 'vicreg'])
+
 
     parser.add_argument(
         "--ckpt", type=str, default=None,

@@ -170,7 +170,7 @@ def train(args):
 
             total += labels.size(0)
 
-            if step % 10 == 0 and rank == 0:
+            if step % 100 == 0 and rank == 0:
                 logger.info(f"Epoch [{epoch}/{args.epochs}] Step [{step}/{len(train_loader)}] Loss: {loss.item():.4f}")
         
         if epoch % 50 == 0:

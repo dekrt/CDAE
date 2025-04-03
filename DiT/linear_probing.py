@@ -193,7 +193,7 @@ def train(model, timestep, blockname, epoch, base_lr, use_amp):
     elif args.dataset == 'tiny':
         num_classes = 200
     elif args.dataset == 'imagenet':
-        num_classes == 1000
+        num_classes = 1000
 
     classifier = Classifier(feat_func, base_lr, epoch, num_classes).to(device)
 
@@ -293,7 +293,7 @@ if __name__ == "__main__":
         ])
         val_transform = transforms.Compose(
             [
-                transforms.Resize(256),
+                transforms.Resize((256, 256)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
             ]

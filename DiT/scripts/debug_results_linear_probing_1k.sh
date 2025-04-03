@@ -1,11 +1,11 @@
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
+CUDA_VISIBLE_DEVICES=1,5 torchrun \
   --nnodes=1 \
-  --nproc_per_node=8 \
+  --nproc_per_node=2 \
   linear_probing.py \
   --train-data-path /lpai/dataset/imagenet-1k/0-1-0/train \
   --val-data-path /lpai/dataset/imagenet-1k/0-1-0/ILSVRC2012/val \
   --dataset imagenet \
-  --batch-size 256 \
+  --batch-size 32 \
   --results-dir /lpai/output/models \
   --epoch 40 \
   --ckpt /lpai/output/models/final.pt \

@@ -14,6 +14,9 @@ evaluation metrics via the ADM repo: https://github.com/openai/guided-diffusion/
 
 For a simple single-GPU/CPU sampling script, see sample.py.
 """
+import sys
+sys.path.insert(0, '/lpai/zxk/ddae/DiT')
+
 import torch
 import torch.distributed as dist
 from models import DiT_models
@@ -26,7 +29,7 @@ from PIL import Image
 import numpy as np
 import math
 import argparse
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,3 "
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,3 "
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
     """
@@ -167,3 +170,5 @@ if __name__ == "__main__":
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     args = parser.parse_args()
     main(args)
+
+    #torchrun --nnodes=1 --nproc_per_node=2 evaluation_fid/sample_ddp.py --model DiT-XL/2 --num-fid-samples 50000

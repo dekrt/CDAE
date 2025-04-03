@@ -5,7 +5,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
   --train-data-path /lpai/dataset/imagenet-1k/0-1-0/train \
   --val-data-path /lpai/dataset/imagenet-1k/0-1-0/ILSVRC2012/val \
   --dataset imagenet \
-  --batch-size 384 \
+  --batch-size 256 \
   --results-dir /lpai/output/models \
   --ckpt /lpai/inputs/models/ditssl-25-03-02-1/cdae/pretrained_models/DiT-XL-2-256x256.pt \
   # --ckpt /lpai/zxk/ddae/DiT/pretrained_models/DiT-XL-2-256x256.pt \
