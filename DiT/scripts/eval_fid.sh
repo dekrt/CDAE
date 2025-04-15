@@ -1,6 +1,6 @@
 #!/bin/bash
 
-real_npz="/lpai/volumes/so-volume-bd-ga/lhp/cdae/VIRTUAL_imagenet256_labeled.npz"
+real_npz="/lpai/VIRTUAL_imagenet256_labeled.npz"
 sample_dir="/lpai/output/models/samples"
 log_file="/lpai/output/models/samples/evaluation_results.txt"
 
