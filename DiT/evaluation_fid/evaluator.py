@@ -52,12 +52,36 @@ def main():
     sample_stats, sample_stats_spatial = evaluator.read_statistics(args.sample_batch, sample_acts)
 
     print("Computing evaluations...")
-    print("Inception Score:", evaluator.compute_inception_score(sample_acts[0]))
-    print("FID:", sample_stats.frechet_distance(ref_stats))
-    print("sFID:", sample_stats_spatial.frechet_distance(ref_stats_spatial))
+    inception_score = evaluator.compute_inception_score(sample_acts[0])
+    fid_value = sample_stats.frechet_distance(ref_stats)
+    '''
+    sfid_value = sample_stats_spatial.frechet_distance(ref_stats_spatial)
     prec, recall = evaluator.compute_prec_recall(ref_acts[0], sample_acts[0])
-    print("Precision:", prec)
+    '''
+    # 获取文件名的最后一级名字
+    ref_filename = os.path.basename(args.ref_batch)
+    sample_filename = os.path.basename(args.sample_batch)
+
+    # 打印结果
+    print("Inception Score:", inception_score)
+    print("FID:", fid_value)
+    '''
+    print("sFID:", sfid_value)
+    print("Precision:", prec)'
     print("Recall:", recall)
+    '''
+    # 将FID结果记录到文件
+    with open("sample_fids/fid_results.txt", "a") as f:
+        f.write(f"Reference File: {ref_filename}\n")
+        f.write(f"Sample File: {sample_filename}\n")
+        f.write(f"FID: {fid_value}\n")
+        '''
+        f.write(f"sFID: {sfid_value}\n")
+        f.write(f"Inception Score: {inception_score}\n")
+        f.write(f"Precision: {prec}\n")
+        f.write(f"Recall: {recall}\n")
+        '''
+        f.write("\n")
 
 
 class InvalidFIDException(Exception):
@@ -340,8 +364,8 @@ class ManifoldEstimator:
                  - precision: an np.ndarray of length K1
                  - recall: an np.ndarray of length K2
         """
-        features_1_status = np.zeros([len(features_1), radii_2.shape[1]], dtype=np.bool)
-        features_2_status = np.zeros([len(features_2), radii_1.shape[1]], dtype=np.bool)
+        features_1_status = np.zeros([len(features_1), radii_2.shape[1]], dtype=bool)
+        features_2_status = np.zeros([len(features_2), radii_1.shape[1]], dtype=bool)
         for begin_1 in range(0, len(features_1), self.row_batch_size):
             end_1 = begin_1 + self.row_batch_size
             batch_1 = features_1[begin_1:end_1]

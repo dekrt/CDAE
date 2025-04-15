@@ -82,9 +82,16 @@ def main(args):
 
     # Create folder to save samples:
     model_string_name = args.model.replace("/", "-")
-    ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
-    folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-" \
-                  f"cfg-{args.cfg_scale}-seed-{args.global_seed}"
+    # ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
+    # folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-" \
+    #               f"cfg-{args.cfg_scale}-seed-{args.global_seed}"
+
+    ckpt_parts = os.path.normpath(args.ckpt).split(os.sep)
+    if len(ckpt_parts) >= 2:
+        ckpt_string_name = f"{ckpt_parts[-2]}-{os.path.splitext(ckpt_parts[-1])[0]}"
+    else:
+        ckpt_string_name = os.path.splitext(os.path.basename(args.ckpt))[0]
+    folder_name = ckpt_string_name
     sample_folder_dir = f"{args.sample_dir}/{folder_name}"
     if rank == 0:
         os.makedirs(sample_folder_dir, exist_ok=True)

@@ -29,7 +29,8 @@ from PIL import Image
 import numpy as np
 import math
 import argparse
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,3 "
+from numpy.core.multiarray import _reconstruct
+
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
     """
@@ -78,7 +79,9 @@ def main(args):
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
+    torch.serialization.add_safe_globals([_reconstruct])
     state_dict = find_model(ckpt_path)
+
     model.load_state_dict(state_dict)
     model.eval()  # important!
     diffusion = create_diffusion(str(args.num_sampling_steps))
@@ -156,7 +159,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
-    parser.add_argument("--sample-dir", type=str, default="samples")
+    parser.add_argument("--sample-dir", type=str, default="sample_fids")
     parser.add_argument("--per-proc-batch-size", type=int, default=32)
     parser.add_argument("--num-fid-samples", type=int, default=50_000)
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
@@ -166,7 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--tf32", action=argparse.BooleanOptionalAction, default=True,
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
-    parser.add_argument("--ckpt", type=str, default="/lpai/models/ditssl/25-03-02-1/cdae/pretrained_models/DiT-XL-2-256x256.pt",
+    parser.add_argument("--ckpt", type=str, default="/lpai/models/ditssl/v2/final.pt",
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     args = parser.parse_args()
     main(args)

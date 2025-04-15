@@ -184,5 +184,6 @@ DiT/results
 DiT/dataset
 DiT/sample_images
 DiT/samples
+DiT/sample_fids
 data/
 results/

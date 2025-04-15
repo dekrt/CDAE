@@ -205,6 +205,41 @@ class GaussianDiffusion:
             (1.0 - self.alphas_cumprod_prev) * np.sqrt(alphas) / (1.0 - self.alphas_cumprod)
         )
 
+    def patchwise_noise(x, strong_ratio=0.5, strong_std=1.0, weak_std=0.1, patch_size=2):
+        """
+        对一部分 patch 加强噪声，另一部分使用正常噪声
+        :param x: (N, C, H, W) latent 输入
+        :return: 添加了非均匀噪声的 latent
+        """
+        N, C, H, W = x.shape
+        num_patches = (H // patch_size) * (W // patch_size)  # e.g. 16*16 = 256
+        device = x.device
+
+        # 将输入拆成 patch：-> (N, C, H//p, p, W//p, p) -> (N, num_patches, C, p, p)
+        x_reshaped = x.reshape(N, C, H // patch_size, patch_size, W // patch_size, patch_size)
+        x_patches = x_reshaped.permute(0, 2, 4, 1, 3, 5).reshape(N, num_patches, C, patch_size, patch_size)
+
+        # 构造 mask，标记哪些 patch 要加重噪声
+        mask = torch.rand(N, num_patches, device=device) < strong_ratio  # True 表示该 patch 加强噪音
+        mask = mask[:, :, None, None, None]  # (N, num_patches, 1, 1, 1)
+
+        # 生成两种不同 std 的噪声
+        strong_noise = torch.randn_like(x_patches) * strong_std
+        weak_noise = torch.randn_like(x_patches) * weak_std
+
+        # 混合噪声
+        noise = strong_noise * mask + weak_noise * (~mask)
+
+        # 添加噪声
+        x_noised = x_patches + noise
+
+        # 重组为原图：(N, num_patches, C, p, p) -> (N, C, H, W)
+        x_noised = x_noised.reshape(N, H // patch_size, W // patch_size, C, patch_size, patch_size)
+        x_noised = x_noised.permute(0, 3, 1, 4, 2, 5).reshape(N, C, H, W)
+
+        return x_noised
+
+
     def q_mean_variance(self, x_start, t):
         """
         Get the distribution q(x_t | x_0).
