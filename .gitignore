@@ -187,3 +187,9 @@ DiT/samples
 DiT/sample_fids
 data/
 results/
+
+# models
+*.pb
+*.pth
+*.pt
+

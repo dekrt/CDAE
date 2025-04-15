@@ -54,34 +54,29 @@ def main():
     print("Computing evaluations...")
     inception_score = evaluator.compute_inception_score(sample_acts[0])
     fid_value = sample_stats.frechet_distance(ref_stats)
-    '''
     sfid_value = sample_stats_spatial.frechet_distance(ref_stats_spatial)
     prec, recall = evaluator.compute_prec_recall(ref_acts[0], sample_acts[0])
-    '''
-    # 获取文件名的最后一级名字
-    ref_filename = os.path.basename(args.ref_batch)
-    sample_filename = os.path.basename(args.sample_batch)
+    
 
     # 打印结果
     print("Inception Score:", inception_score)
     print("FID:", fid_value)
-    '''
     print("sFID:", sfid_value)
-    print("Precision:", prec)'
+    print("Precision:", prec)
     print("Recall:", recall)
-    '''
-    # 将FID结果记录到文件
-    with open("sample_fids/fid_results.txt", "a") as f:
-        f.write(f"Reference File: {ref_filename}\n")
-        f.write(f"Sample File: {sample_filename}\n")
-        f.write(f"FID: {fid_value}\n")
-        '''
-        f.write(f"sFID: {sfid_value}\n")
-        f.write(f"Inception Score: {inception_score}\n")
-        f.write(f"Precision: {prec}\n")
-        f.write(f"Recall: {recall}\n")
-        '''
-        f.write("\n")
+    # # 将FID结果记录到文件
+    # with open("sample_fids/fid_results.txt", "a") as f:
+    #     f.write(f"Reference File: {ref_filename}\n")
+    #     f.write(f"Sample File: {sample_filename}\n")
+    #     f.write(f"FID: {fid_value}\n")
+    #     '''
+    #     f.write(f"sFID: {sfid_value}\n")
+    #     f.write(f"Inception Score: {inception_score}\n")
+    #     f.write(f"Precision: {prec}\n")
+    #     f.write(f"Recall: {recall}\n")
+    #     '''
+    
+    #     f.write("\n")
 
 
 class InvalidFIDException(Exception):
