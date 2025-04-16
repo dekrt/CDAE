@@ -1,6 +1,6 @@
 #!/bin/bash
 
-real_npz="/lpai/VIRTUAL_imagenet256_labeled.npz"
+real_npz="/lpai/inputs/models/ditssl-virtual/VIRTUAL_imagenet256_labeled.npz"
 sample_dir="/lpai/output/models/samples"
 log_file="/lpai/output/models/samples/evaluation_results.txt"
 
