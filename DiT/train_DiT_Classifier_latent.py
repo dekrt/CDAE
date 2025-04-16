@@ -142,7 +142,6 @@ def train(args):
         model.train()
         train_sampler.set_epoch(epoch)
         total_loss, correct, total = 0, 0, 0
-        start_time = time()
 
         for step, (images, labels) in enumerate(train_loader):
             images = images.to(device)
