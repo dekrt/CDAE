@@ -1,8 +1,8 @@
 ckpts=(
-    "/lpai/inputs/models/ditssl-25-03-02-1/cdae/pretrained_models/DiT-XL-2-256x256.pt"
+    # "/lpai/inputs/models/ditssl-25-03-02-1/cdae/pretrained_models/DiT-XL-2-256x256.pt"
     "/lpai/inputs/models/ditssl-v2/final.pt"
-    "/lpai/inputs/models/ditssl-simclr/final.pt"
-    "/lpai/inputs/models/ditssl-vicreg/final.pt"
+    # "/lpai/inputs/models/ditssl-simclr/final.pt"
+    # "/lpai/inputs/models/ditssl-vicreg/final.pt"
 )
 
 for ckpt in "${ckpts[@]}"
